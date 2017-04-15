@@ -31,7 +31,7 @@ fun main(args: Array<String>) {
                     end - start
                 }.forEach { stats.accept(it) }
             }
-            val batchInsert: (LongSummaryStatistics) -> Unit = { stats ->
+            val largeBatchInsert: (LongSummaryStatistics) -> Unit = { stats ->
                 val start = System.nanoTime()
                 val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values ${
                     (0..testData.size).map { "(?, ?, ?, ?, ?)" }.joinToString(",")
@@ -47,8 +47,8 @@ fun main(args: Array<String>) {
             }
             println("Single insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, singleInsert)}")
             println("Single insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
-            println("Large batch insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, batchInsert)}")
-            println("Large batch insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, batchInsert)}")
+            println("Large batch insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Large batch insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")
         }
     } catch(e: Exception) {
         e.printStackTrace()
