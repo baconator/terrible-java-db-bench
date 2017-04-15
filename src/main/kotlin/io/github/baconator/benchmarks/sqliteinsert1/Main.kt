@@ -75,7 +75,9 @@ fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: Schedu
     connection.createStatement().use { statement ->
         statement.queryTimeout = 30
         statement.executeUpdate("drop table if exists benchmark;")
-        statement.executeUpdate("create table benchmark(i1 double, i2 double, o1 double, o2 double, fitness double);")
+        statement.executeUpdate("create table benchmark(i1 double, i2 double, o1 double, o2 double, fitness double, primary key(i1, i2));")
+        statement.executeUpdate("create index fitness on benchmark (fitness);")
+        statement.executeUpdate("create index outputs on benchmark (o1, o2);")
     }
     val stats = LongSummaryStatistics()
     runForMs({ test(stats) }, maxDurationMs, backgroundPool)
