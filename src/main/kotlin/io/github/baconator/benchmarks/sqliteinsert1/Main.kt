@@ -20,7 +20,19 @@ fun main(args: Array<String>) {
     try {
         DriverManager.getConnection("jdbc:sqlite:$filename").use { connection ->
             val singleInsert: (LongSummaryStatistics) -> Unit = { stats ->
-                testData.asSequence().map { row -> insertRow(connection, row) }.forEach { stats.accept(it) }
+                testData.asSequence().map { row ->
+                    val start = System.nanoTime()
+                    val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);")
+                    prepared.setObject(1, row.input1)
+                    prepared.setObject(2, row.input2)
+                    prepared.setObject(3, row.output1)
+                    prepared.setObject(4, row.output2)
+                    prepared.setObject(5, row.fitness)
+                    val result = prepared.execute()
+                    val end = System.nanoTime()
+                    assert(result, { -> "Failed to insert a row ..." })
+                    end - start
+                }.forEach { stats.accept(it) }
             }
             timeTestSyncOff(connection, maxDurationMs, backgroundPool, singleInsert)
             timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)
@@ -91,23 +103,6 @@ private fun runForMs(f: () -> Unit, maxDurationMs: Long, pool: ScheduledExecutor
     } catch(e: TimeoutException) {
         print("Cancelled thread after $maxDurationMs ms. ")
     }
-}
-
-/**
- * Inserts a single row; returns duration in ns.
- */
-private fun insertRow(connection: Connection, row: Row): Long {
-    val start = System.nanoTime()
-    val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);")
-    prepared.setObject(1, row.input1)
-    prepared.setObject(2, row.input2)
-    prepared.setObject(3, row.output1)
-    prepared.setObject(4, row.output2)
-    prepared.setObject(5, row.fitness)
-    val result = prepared.execute()
-    val end = System.nanoTime()
-    assert(result, { -> "Failed to insert a row ..." })
-    return end - start
 }
 
 fun timeBatchInserts(connection: Connection, testData: Set<Row>) {}
