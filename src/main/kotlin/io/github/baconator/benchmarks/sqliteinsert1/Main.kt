@@ -52,8 +52,10 @@ fun main(args: Array<String>) {
                 assert(result, { -> "Failed to insert a row ..." })
                 stats.accept(end - start)
             }
-            println("Insert stats: ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, singleInsert)}")
-            println("Insert stats: ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
+            println("Single insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, singleInsert)}")
+            println("Single insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
+            println("Large batch insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, batchInsert)}")
+            println("Large batch insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, batchInsert)}")
         }
     } catch(e: Exception) {
         e.printStackTrace()
