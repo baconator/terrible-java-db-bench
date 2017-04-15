@@ -4,6 +4,7 @@ import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.PreparedStatement
 import java.util.*
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -23,11 +24,7 @@ fun main(args: Array<String>) {
                 testData.asSequence().map { row ->
                     val start = System.nanoTime()
                     val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);")
-                    prepared.setObject(1, row.input1)
-                    prepared.setObject(2, row.input2)
-                    prepared.setObject(3, row.output1)
-                    prepared.setObject(4, row.output2)
-                    prepared.setObject(5, row.fitness)
+                    row.applyToStatement(prepared)
                     val result = prepared.execute()
                     val end = System.nanoTime()
                     assert(result, { -> "Failed to insert a row ..." })
@@ -41,11 +38,7 @@ fun main(args: Array<String>) {
                 };")
                 testData.forEachIndexed( { i, row ->
                     val base = i*5 + 1;
-                    prepared.setObject(base + 0, row.input1)
-                    prepared.setObject(base + 1, row.input2)
-                    prepared.setObject(base + 2, row.output1)
-                    prepared.setObject(base + 3, row.output2)
-                    prepared.setObject(base + 4, row.fitness)
+                    row.applyToStatement(prepared, base)
                 })
                 val result = prepared.execute()
                 val end = System.nanoTime()
@@ -80,6 +73,14 @@ class Row(val input1: Double, val input2: Double, val output1: Double, val outpu
 
     override fun hashCode(): Int {
         return Objects.hash(input1, input2)
+    }
+
+    fun applyToStatement(prepared: PreparedStatement, base: Int = 1) {
+        prepared.setObject(base + 0, this.input1)
+        prepared.setObject(base + 1, this.input2)
+        prepared.setObject(base + 2, this.output1)
+        prepared.setObject(base + 3, this.output2)
+        prepared.setObject(base + 4, this.fitness)
     }
 }
 
