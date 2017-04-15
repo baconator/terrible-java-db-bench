@@ -34,9 +34,26 @@ fun main(args: Array<String>) {
                     end - start
                 }.forEach { stats.accept(it) }
             }
-            timeTestSyncOff(connection, maxDurationMs, backgroundPool, singleInsert)
-            timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)
-            timeBatchInserts(connection, testData)
+            val batchInsert: (LongSummaryStatistics) -> Unit = { stats ->
+                val start = System.nanoTime()
+                val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values ${
+                    (0..testData.size).map { "(?, ?, ?, ?, ?)" }.joinToString(",")
+                };")
+                testData.forEachIndexed( { i, row ->
+                    val base = i*5 + 1;
+                    prepared.setObject(base + 0, row.input1)
+                    prepared.setObject(base + 1, row.input2)
+                    prepared.setObject(base + 2, row.output1)
+                    prepared.setObject(base + 3, row.output2)
+                    prepared.setObject(base + 4, row.fitness)
+                })
+                val result = prepared.execute()
+                val end = System.nanoTime()
+                assert(result, { -> "Failed to insert a row ..." })
+                stats.accept(end - start)
+            }
+            println("Insert stats: ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, singleInsert)}")
+            println("Insert stats: ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
         }
     } catch(e: Exception) {
         e.printStackTrace()
@@ -73,17 +90,17 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     return output
 }
 
-fun timeTestSyncOff(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit) {
+fun timeTestSyncOff(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit): LongSummaryStatistics {
     connection.createStatement().use { it.execute("pragma synchronous=off;") }
-    timeTest(connection, maxDurationMs, backgroundPool, test)
+    return timeTest(connection, maxDurationMs, backgroundPool, test)
 }
 
-fun timeTestSyncOn(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit) {
+fun timeTestSyncOn(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit): LongSummaryStatistics {
     connection.createStatement().use { it.execute("pragma synchronous=on;") }
-    timeTest(connection, maxDurationMs, backgroundPool, test)
+    return timeTest(connection, maxDurationMs, backgroundPool, test)
 }
 
-fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit) {
+fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit): LongSummaryStatistics {
     connection.createStatement().use { statement ->
         statement.queryTimeout = 30
         statement.executeUpdate("drop table if exists benchmark;")
@@ -93,7 +110,7 @@ fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: Schedu
     }
     val stats = LongSummaryStatistics()
     runForMs({ test(stats) }, maxDurationMs, backgroundPool)
-    println("Single insert stats: $stats")
+    return stats
 }
 
 private fun runForMs(f: () -> Unit, maxDurationMs: Long, pool: ScheduledExecutorService) {
