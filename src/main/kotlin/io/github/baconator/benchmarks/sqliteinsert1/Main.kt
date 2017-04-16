@@ -8,6 +8,13 @@ import java.sql.PreparedStatement
 import java.util.*
 import java.util.concurrent.*
 
+data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics(), val insertTimes: LongSummaryStatistics = LongSummaryStatistics()) {
+    fun accept(size: Long, time: Long) {
+        batchSizes.accept(size)
+        insertTimes.accept(time)
+    }
+}
+
 fun main(args: Array<String>) {
     val now = System.nanoTime()
     val sampleSize = 10000
@@ -19,9 +26,9 @@ fun main(args: Array<String>) {
     val streamingPool = Executors.newScheduledThreadPool(6)
     try {
         val batchPauseMs = 10L
-        val singleValueCreatedMs = 2L
+        val singleValueCreatedMs = 1L
         DriverManager.getConnection("jdbc:sqlite:$filename").use { connection ->
-            val singleInsert: (LongSummaryStatistics) -> Unit = { stats ->
+            val singleInsert: (Stats) -> Unit = { stats ->
                 testData.asSequence().map { row ->
                     val start = System.nanoTime()
                     val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);")
@@ -30,38 +37,32 @@ fun main(args: Array<String>) {
                     val end = System.nanoTime()
                     assert(result, { -> "Failed to insert a row ..." })
                     end - start
-                }.forEach { stats.accept(it) }
+                }.forEach { stats.accept(1, it) }
             }
-            val largeBatchInsert: (LongSummaryStatistics) -> Unit = { stats ->
+            val largeBatchInsert: (Stats) -> Unit = { stats ->
                 val start = System.nanoTime()
                 val prepared = makeBatchInsertStatement(connection, testDataArray)
                 val result = prepared.execute()
                 val end = System.nanoTime()
                 assert(result, { -> "Failed to insert a row ..." })
-                stats.accept(end - start)
+                stats.accept(testDataArray.size.toLong(), end - start)
             }
-            var sanityCheck = 0
-            val streamingBatchInsert: (LongSummaryStatistics) -> Unit = { stats ->
+            val streamingBatchInsert: (Stats) -> Unit = { stats ->
                 val queue = ConcurrentLinkedQueue<Row>()
                 val orderedTestData = testData.toList()
 
                 var dataPosition = 0
-                var generationComplete = false
                 val stopLatch = CountDownLatch(1)
                 val generation = streamingPool.scheduleAtFixedRate({
                     synchronized(dataPosition) {
                         queue.add(orderedTestData[dataPosition])
                         dataPosition += 1
                         if (dataPosition >= orderedTestData.size) {
-                            generationComplete = true
                             throw Exception("This is so terrible. Eh.")
                         }
                     }
                 }, 0, singleValueCreatedMs, TimeUnit.MILLISECONDS)
                 val insertion = streamingPool.scheduleAtFixedRate({
-                    if (generationComplete) {
-                        stopLatch.countDown()
-                    }
                     val batch = queue.toTypedArray()
                     if (!batch.isEmpty()) {
                         queue.removeAll(batch)
@@ -69,9 +70,11 @@ fun main(args: Array<String>) {
                         val prepared = makeBatchInsertStatement(connection, batch)
                         val result = prepared.execute()
                         val end = System.nanoTime()
-                        sanityCheck += batch.size
                         assert(result, { -> "Failed to insert a row ..." })
-                        stats.accept(end - start)
+                        stats.accept(batch.size.toLong(), end - start)
+                    }
+                    if (generation.isDone) {
+                        stopLatch.countDown()
                     }
                 }, 0, batchPauseMs, TimeUnit.MILLISECONDS)
                 stopLatch.await()
@@ -79,7 +82,6 @@ fun main(args: Array<String>) {
                 insertion.cancel(true)
             }
             println("Single insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, streamingBatchInsert)}")
-            println("Sanity check: $sanityCheck")
             /*println("Single insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
             println("Large batch insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")
             println("Large batch insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")*/
@@ -87,8 +89,8 @@ fun main(args: Array<String>) {
     } catch(e: Exception) {
         e.printStackTrace()
     }
-    backgroundPool.shutdown()
-    streamingPool.shutdown()
+    backgroundPool.shutdownNow()
+    streamingPool.shutdownNow()
     try {
         val fs = FileSystems.getDefault()
         Files.delete(fs.getPath("./$filename"))
@@ -139,17 +141,17 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     return output
 }
 
-fun timeTestSyncOff(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit): LongSummaryStatistics {
+fun timeTestSyncOff(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
     connection.createStatement().use { it.execute("pragma synchronous=off;") }
     return timeTest(connection, maxDurationMs, backgroundPool, test)
 }
 
-fun timeTestSyncOn(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit): LongSummaryStatistics {
+fun timeTestSyncOn(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
     connection.createStatement().use { it.execute("pragma synchronous=on;") }
     return timeTest(connection, maxDurationMs, backgroundPool, test)
 }
 
-fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (LongSummaryStatistics) -> Unit): LongSummaryStatistics {
+fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
     connection.createStatement().use { statement ->
         statement.queryTimeout = 30
         statement.executeUpdate("drop table if exists benchmark;")
@@ -157,7 +159,7 @@ fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: Schedu
         statement.executeUpdate("create index fitness on benchmark (fitness);")
         statement.executeUpdate("create index outputs on benchmark (o1, o2);")
     }
-    val stats = LongSummaryStatistics()
+    val stats = Stats()
     runForMs({ test(stats) }, maxDurationMs, backgroundPool)
     return stats
 }
