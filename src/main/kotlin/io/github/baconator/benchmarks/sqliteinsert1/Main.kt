@@ -17,9 +17,25 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
 }
 
 class TestBuilder(val connection: Connection) {
-    fun withTestSyncOff(): Connection {
+    fun withTestSyncOff(): TestBuilder {
         connection.createStatement().use { it.execute("pragma synchronous=off;") }
-        return connection
+        return this
+    }
+
+    fun withTestSyncOn(): TestBuilder {
+        connection.createStatement().use { it.execute("pragma synchronous=on;") }
+        return this
+    }
+
+    fun prepareTable(): TestBuilder {
+        connection.createStatement().use { statement ->
+            statement.queryTimeout = 30
+            statement.executeUpdate("drop table if exists benchmark;")
+            statement.executeUpdate("create table benchmark(i1 double, i2 double, o1 double, o2 double, fitness double, primary key(i1, i2));")
+            statement.executeUpdate("create index fitness on benchmark (fitness);")
+            statement.executeUpdate("create index outputs on benchmark (o1, o2);")
+        }
+        return this
     }
 }
 
@@ -69,10 +85,10 @@ fun main(args: Array<String>) {
                     }
                 }
             }
-            println("Single insert stats (sync off): ${timeTestSyncOff(TestBuilder(connection), maxDurationMs, backgroundPool, smallBatchInsert)}")
-            /*println("Single insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
-            println("Large batch insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")
-            println("Large batch insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")*/
+            println("Single insert stats (sync off): ${timeTest(TestBuilder(connection).withTestSyncOff(), maxDurationMs, backgroundPool, smallBatchInsert)}")
+            println("Single insert stats (sync on): ${timeTest(TestBuilder(connection).withTestSyncOn(), maxDurationMs, backgroundPool, singleInsert)}")
+            println("Large batch insert stats (sync off): ${timeTest(TestBuilder(connection).withTestSyncOff(), maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Large batch insert stats (sync on): ${timeTest(TestBuilder(connection).withTestSyncOn(), maxDurationMs, backgroundPool, largeBatchInsert)}")
         }
     } catch(e: Exception) {
         e.printStackTrace()
@@ -129,23 +145,8 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     return output
 }
 
-fun timeTestSyncOff(connection: TestBuilder, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
-    return timeTest(connection.withTestSyncOff(), maxDurationMs, backgroundPool, test)
-}
-
-fun timeTestSyncOn(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
-    connection.createStatement().use { it.execute("pragma synchronous=on;") }
-    return timeTest(connection, maxDurationMs, backgroundPool, test)
-}
-
-fun timeTest(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
-    connection.createStatement().use { statement ->
-        statement.queryTimeout = 30
-        statement.executeUpdate("drop table if exists benchmark;")
-        statement.executeUpdate("create table benchmark(i1 double, i2 double, o1 double, o2 double, fitness double, primary key(i1, i2));")
-        statement.executeUpdate("create index fitness on benchmark (fitness);")
-        statement.executeUpdate("create index outputs on benchmark (o1, o2);")
-    }
+fun timeTest(connection: TestBuilder, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
+    connection.prepareTable()
     val stats = Stats()
     runForMs({ test(stats) }, maxDurationMs, backgroundPool)
     return stats
