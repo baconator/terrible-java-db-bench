@@ -16,6 +16,13 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
     }
 }
 
+class TestBuilder(val connection: Connection) {
+    fun withTestSyncOff(): Connection {
+        connection.createStatement().use { it.execute("pragma synchronous=off;") }
+        return connection
+    }
+}
+
 fun main(args: Array<String>) {
     val now = System.nanoTime()
     val sampleSize = 10000
@@ -62,7 +69,7 @@ fun main(args: Array<String>) {
                     }
                 }
             }
-            println("Single insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, smallBatchInsert)}")
+            println("Single insert stats (sync off): ${timeTestSyncOff(TestBuilder(connection), maxDurationMs, backgroundPool, smallBatchInsert)}")
             /*println("Single insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, singleInsert)}")
             println("Large batch insert stats (sync off): ${timeTestSyncOff(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")
             println("Large batch insert stats (sync on): ${timeTestSyncOn(connection, maxDurationMs, backgroundPool, largeBatchInsert)}")*/
@@ -122,9 +129,8 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     return output
 }
 
-fun timeTestSyncOff(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
-    connection.createStatement().use { it.execute("pragma synchronous=off;") }
-    return timeTest(connection, maxDurationMs, backgroundPool, test)
+fun timeTestSyncOff(connection: TestBuilder, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
+    return timeTest(connection.withTestSyncOff(), maxDurationMs, backgroundPool, test)
 }
 
 fun timeTestSyncOn(connection: Connection, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
