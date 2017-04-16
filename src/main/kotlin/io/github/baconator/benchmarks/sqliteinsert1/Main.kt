@@ -52,13 +52,12 @@ fun main(args: Array<String>) {
                 val orderedTestData = testData.toList()
 
                 var dataPosition = 0
-                val stopLatch = CountDownLatch(1)
                 val generation = streamingPool.scheduleAtFixedRate({
                     synchronized(dataPosition) {
                         queue.add(orderedTestData[dataPosition])
                         dataPosition += 1
                         if (dataPosition >= orderedTestData.size) {
-                            throw Exception("This is so terrible. Eh.")
+                            Thread.currentThread().interrupt()
                         }
                     }
                 }, 0, singleValueCreatedMs, TimeUnit.MILLISECONDS)
@@ -74,10 +73,10 @@ fun main(args: Array<String>) {
                         stats.accept(batch.size.toLong(), end - start)
                     }
                     if (generation.isDone) {
-                        stopLatch.countDown()
+                        Thread.currentThread().interrupt()
                     }
                 }, 0, batchPauseMs, TimeUnit.MILLISECONDS)
-                stopLatch.await()
+                insertion.get()
                 generation.cancel(true)
                 insertion.cancel(true)
             }
