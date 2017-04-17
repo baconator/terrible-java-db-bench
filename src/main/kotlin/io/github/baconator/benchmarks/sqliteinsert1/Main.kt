@@ -79,14 +79,13 @@ fun main(args: Array<String>) {
     // The background pool is used for killing tests after maxTestDurationMs milliseconds.
     val backgroundPool = Executors.newScheduledThreadPool(6)
     try {
-        DriverManager.getConnection("jdbc:sqlite:$benchDbFilename").use { c ->
-            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()
-            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()
-            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()
-            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()
-        }
+        val jdbcUrl = "jdbc:sqlite:$benchDbFilename"
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()}
+        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()}
+        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()}
+        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()}
+        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()}
+        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()}
     } catch(e: Exception) {
         e.printStackTrace()
     }
@@ -100,18 +99,9 @@ fun main(args: Array<String>) {
 }
 
 /**
- * input1 + input2 are primary keys, output1, output2 and fitness are indexed.
+ * input1 + input2 are primary keys, output1, output2 and fitness are indexed. Yes, I know that the pkeys aren't aligned w/the db schemas.
  */
-class Row(val input1: Double, val input2: Double, val output1: Double, val output2: Double, val fitness: Double) {
-    override fun equals(other: Any?): Boolean {
-        val casted = other as? Row ?: return false
-        return input1 == casted.input1 && input2 == casted.input2
-    }
-
-    override fun hashCode(): Int {
-        return Objects.hash(input1, input2)
-    }
-
+data class Row(val input1: Double, val input2: Double, val output1: Double, val output2: Double, val fitness: Double) {
     fun applyToStatement(prepared: PreparedStatement, base: Int = 1) {
         prepared.setObject(base + 0, this.input1)
         prepared.setObject(base + 1, this.input2)
