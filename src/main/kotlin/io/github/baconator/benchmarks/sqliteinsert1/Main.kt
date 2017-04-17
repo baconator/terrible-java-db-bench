@@ -218,12 +218,6 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     return output
 }
 
-fun runTest(connection: TestBuilder, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (TestBuilder, Stats) -> Unit): Stats {
-    val stats = Stats()
-    runForMs({ test(connection, stats) }, maxDurationMs, backgroundPool)
-    return stats
-}
-
 private fun runForMs(f: () -> Unit, maxDurationMs: Long, pool: ScheduledExecutorService) {
     val background = pool.schedule(f, 0, TimeUnit.MILLISECONDS)
     try {
@@ -233,6 +227,3 @@ private fun runForMs(f: () -> Unit, maxDurationMs: Long, pool: ScheduledExecutor
     }
 }
 
-fun timeBatchInserts(connection: Connection, testData: Set<Row>) {}
-
-fun cleanup() {}
