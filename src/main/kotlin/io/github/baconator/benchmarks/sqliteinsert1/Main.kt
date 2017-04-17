@@ -72,6 +72,13 @@ class TestBuilder(val connection: Connection) {
     fun print() {
         println("${testFun?.name} (sync: $syncOn): $stats")
     }
+
+    fun preinsertData(data: Set<Row>): TestBuilder {
+        batchInsertStatement(data.toTypedArray()) { prepared ->
+            prepared.execute()
+        }
+        return this
+    }
 }
 
 class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
@@ -83,7 +90,9 @@ class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
 fun main(args: Array<String>) {
     val now = System.nanoTime()
     val sampleSize = 10000
-    val testData = generateTestData(sampleSize)
+    val sourceData = generateTestData(sampleSize*2)
+    val testData = sourceData.take(sampleSize).toSet()
+    val preinsertedData = sourceData.drop(sampleSize).take(sampleSize).toSet()
     val maxDurationMs = 5 * 1000L;
     val filename = "benchmark-$now.db"
     val backgroundPool = Executors.newScheduledThreadPool(6)
@@ -123,12 +132,12 @@ fun main(args: Array<String>) {
     }
     try {
         DriverManager.getConnection("jdbc:sqlite:$filename").use { c ->
-            TestBuilder(c).syncOff().prepareTable().runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).syncOn().prepareTable().runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).syncOff().prepareTable().runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
-            TestBuilder(c).syncOn().prepareTable().runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
-            TestBuilder(c).syncOff().prepareTable().runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
-            TestBuilder(c).syncOn().prepareTable().runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
+            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
+            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
+            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
         }
     } catch(e: Exception) {
         e.printStackTrace()
