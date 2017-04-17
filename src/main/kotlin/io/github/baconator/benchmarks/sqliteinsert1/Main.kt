@@ -92,7 +92,12 @@ class TestBuilder(val connection: Connection) {
      */
     fun runTest(testData: Set<Row>, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: TestF): TestBuilder {
         val stats = Stats()
-        runForMs({ test.execute(testData, this, stats) }, maxDurationMs, backgroundPool)
+        val background = backgroundPool.schedule({ test.execute(testData, this, stats) }, 0, TimeUnit.MILLISECONDS)
+        try {
+            background.get(maxDurationMs, TimeUnit.MILLISECONDS)
+        } catch(e: TimeoutException) {
+            print("Cancelled thread after $maxDurationMs ms. ")
+        }
         this.stats = stats
         this.testFun = test
         return this
@@ -216,14 +221,5 @@ fun generateTestData(sampleSize: Int): Set<Row> {
         output.add(Row(random.nextDouble(), random.nextDouble(), random.nextDouble(), random.nextDouble(), random.nextDouble()))
     }
     return output
-}
-
-private fun runForMs(f: () -> Unit, maxDurationMs: Long, pool: ScheduledExecutorService) {
-    val background = pool.schedule(f, 0, TimeUnit.MILLISECONDS)
-    try {
-        background.get(maxDurationMs, TimeUnit.MILLISECONDS)
-    } catch(e: TimeoutException) {
-        print("Cancelled thread after $maxDurationMs ms. ")
-    }
 }
 
