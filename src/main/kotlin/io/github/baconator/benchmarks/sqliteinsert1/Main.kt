@@ -23,13 +23,13 @@ class TestBuilder(val connection: Connection) {
     var syncOn: Boolean = false
     var stats: Stats? = null
     var testFun: TestF? = null
-    fun withTestSyncOff(): TestBuilder {
+    fun syncOff(): TestBuilder {
         connection.createStatement().use { it.execute("pragma synchronous=off;") }
         syncOn = false
         return this
     }
 
-    fun withTestSyncOn(): TestBuilder {
+    fun syncOn(): TestBuilder {
         connection.createStatement().use { it.execute("pragma synchronous=on;") }
         syncOn = true
         return this
@@ -61,9 +61,9 @@ class TestBuilder(val connection: Connection) {
         }
     }
 
-    fun runTest(maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: TestF): TestBuilder {
+    fun runTest(testData: Set<Row>, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: TestF): TestBuilder {
         val stats = Stats()
-        runForMs({ test.execute(this, stats) }, maxDurationMs, backgroundPool)
+        runForMs({ test.execute(testData, this, stats) }, maxDurationMs, backgroundPool)
         this.stats = stats
         this.testFun = test
         return this
@@ -74,9 +74,9 @@ class TestBuilder(val connection: Connection) {
     }
 }
 
-class TestF(val name: String, val f: (TestBuilder, Stats) -> Unit) {
-    fun execute(testBuilder: TestBuilder, stats: Stats) {
-        return f.invoke(testBuilder, stats)
+class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
+    fun execute(testData: Set<Row>, testBuilder: TestBuilder, stats: Stats) {
+        return f.invoke(testData, testBuilder, stats)
     }
 }
 
@@ -84,56 +84,56 @@ fun main(args: Array<String>) {
     val now = System.nanoTime()
     val sampleSize = 10000
     val testData = generateTestData(sampleSize)
-    val testDataArray = testData.toTypedArray() // In case this is terribly slow
     val maxDurationMs = 5 * 1000L;
     val filename = "benchmark-$now.db"
     val backgroundPool = Executors.newScheduledThreadPool(6)
-    val streamingPool = Executors.newScheduledThreadPool(6)
+    val singleBatchSize = 10;
+    val singleInsert = TestF("Individual insert") { testData, connection, stats ->
+        testData.asSequence().map { row ->
+            val start = System.nanoTime()
+            connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
+                row.applyToStatement(prepared)
+                val result = prepared.execute()
+                val end = System.nanoTime()
+                assert(result, { -> "Failed to insert a row ..." })
+                end - start
+            }
+        }.forEach { stats.accept(1, it) }
+    }
+    val largeBatchInsert = TestF("Large batch insert") { testData, connection, stats ->
+        val start = System.nanoTime()
+        val testDataArray = testData.toTypedArray() // In case this is terribly slow
+        connection.batchInsertStatement(testDataArray) { prepared ->
+            val result = prepared.execute()
+            val end = System.nanoTime()
+            assert(result, { -> "Failed to insert a row ..." })
+            stats.accept(testDataArray.size.toLong(), end - start)
+        }
+    }
+    val smallBatchInsert = TestF("Small batch insert") { testData, connection, stats ->
+        Lists.partition(testData.toList(), singleBatchSize).asSequence().forEach { batch ->
+            val start = System.nanoTime()
+            connection.batchInsertStatement(batch.toTypedArray()) { prepared ->
+                val result = prepared.execute()
+                val end = System.nanoTime()
+                assert(result, { -> "Failed to insert a row ..." })
+                stats.accept(batch.size.toLong(), end - start)
+            }
+        }
+    }
     try {
-        val singleBatchSize = 10;
         DriverManager.getConnection("jdbc:sqlite:$filename").use { c ->
-            val singleInsert = TestF("Individual insert") { connection, stats ->
-                testData.asSequence().map { row ->
-                    val start = System.nanoTime()
-                    connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
-                        row.applyToStatement(prepared)
-                        val result = prepared.execute()
-                        val end = System.nanoTime()
-                        assert(result, { -> "Failed to insert a row ..." })
-                        end - start
-                    }
-                }.forEach { stats.accept(1, it) }
-            }
-            val largeBatchInsert = TestF("Large batch insert") { connection, stats ->
-                val start = System.nanoTime()
-                connection.batchInsertStatement(testDataArray) { prepared ->
-                    val result = prepared.execute()
-                    val end = System.nanoTime()
-                    assert(result, { -> "Failed to insert a row ..." })
-                    stats.accept(testDataArray.size.toLong(), end - start)
-                }
-            }
-            val smallBatchInsert = TestF("Small batch insert") { connection, stats ->
-                Lists.partition(testData.toList(), singleBatchSize).asSequence().forEach { batch ->
-                    val start = System.nanoTime()
-                    connection.batchInsertStatement(batch.toTypedArray()) { prepared ->
-                        val result = prepared.execute()
-                        val end = System.nanoTime()
-                        assert(result, { -> "Failed to insert a row ..." })
-                        stats.accept(batch.size.toLong(), end - start)
-                    }
-                }
-            }
-            TestBuilder(c).withTestSyncOff().prepareTable().runTest(maxDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).withTestSyncOn().prepareTable().runTest(maxDurationMs, backgroundPool, singleInsert).print()
-            TestBuilder(c).withTestSyncOff().prepareTable().runTest(maxDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).withTestSyncOn().prepareTable().runTest(maxDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOn().prepareTable().runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
+            TestBuilder(c).syncOn().prepareTable().runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
+            TestBuilder(c).syncOn().prepareTable().runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
         }
     } catch(e: Exception) {
         e.printStackTrace()
     }
     backgroundPool.shutdownNow()
-    streamingPool.shutdownNow()
     try {
         val fs = FileSystems.getDefault()
         Files.delete(fs.getPath("./$filename"))
