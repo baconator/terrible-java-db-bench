@@ -80,12 +80,12 @@ fun main(args: Array<String>) {
     val backgroundPool = Executors.newScheduledThreadPool(6)
     try {
         val jdbcUrl = "jdbc:sqlite:$benchDbFilename"
-        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()}
-        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()}
-        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()}
-        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()}
-        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()}
-        DriverManager.getConnection(jdbcUrl).use {TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()}
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print() }
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print() }
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print() }
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print() }
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print() }
+        DriverManager.getConnection(jdbcUrl).use { TestBuilder(it).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print() }
     } catch(e: Exception) {
         e.printStackTrace()
     }
