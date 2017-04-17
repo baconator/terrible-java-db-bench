@@ -20,13 +20,16 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
 }
 
 class TestBuilder(val connection: Connection) {
+    var syncOn: Boolean = false
     fun withTestSyncOff(): TestBuilder {
         connection.createStatement().use { it.execute("pragma synchronous=off;") }
+        syncOn = false
         return this
     }
 
     fun withTestSyncOn(): TestBuilder {
         connection.createStatement().use { it.execute("pragma synchronous=on;") }
+        syncOn = true
         return this
     }
 
@@ -55,6 +58,18 @@ class TestBuilder(val connection: Connection) {
             f.invoke(prepared)
         }
     }
+
+    fun runTest(maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: TestF): Stats {
+        val stats = Stats()
+        runForMs({ test.execute(this, stats) }, maxDurationMs, backgroundPool)
+        return stats
+    }
+}
+
+class TestF(val name: String, val f: (TestBuilder, Stats) -> Unit) {
+    fun execute(testBuilder: TestBuilder, stats: Stats) {
+        return f.invoke(testBuilder, stats)
+    }
 }
 
 fun main(args: Array<String>) {
@@ -69,7 +84,7 @@ fun main(args: Array<String>) {
     try {
         val singleBatchSize = 10;
         DriverManager.getConnection("jdbc:sqlite:$filename").use { c ->
-            val singleInsert: (TestBuilder, Stats) -> Unit = { connection, stats ->
+            val singleInsert = TestF("individual insert") { connection, stats ->
                 testData.asSequence().map { row ->
                     val start = System.nanoTime()
                     connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
@@ -81,7 +96,7 @@ fun main(args: Array<String>) {
                     }
                 }.forEach { stats.accept(1, it) }
             }
-            val largeBatchInsert: (TestBuilder, Stats) -> Unit = { connection, stats ->
+            val largeBatchInsert = TestF("large batch insert") { connection, stats ->
                 val start = System.nanoTime()
                 connection.batchInsertStatement(testDataArray) { prepared ->
                     val result = prepared.execute()
@@ -90,7 +105,7 @@ fun main(args: Array<String>) {
                     stats.accept(testDataArray.size.toLong(), end - start)
                 }
             }
-            val smallBatchInsert: (TestBuilder, Stats) -> Unit = { connection, stats ->
+            val smallBatchInsert = TestF("small batch insert") { connection, stats ->
                 Lists.partition(testData.toList(), singleBatchSize).asSequence().forEach { batch ->
                     val start = System.nanoTime()
                     connection.batchInsertStatement(batch.toTypedArray()) { prepared ->
@@ -101,10 +116,10 @@ fun main(args: Array<String>) {
                     }
                 }
             }
-            println("Single insert stats (sync off): ${runTest(TestBuilder(c).withTestSyncOff().prepareTable(), maxDurationMs, backgroundPool, smallBatchInsert)}")
-            println("Single insert stats (sync on): ${runTest(TestBuilder(c).withTestSyncOn().prepareTable(), maxDurationMs, backgroundPool, singleInsert)}")
-            println("Large batch insert stats (sync off): ${runTest(TestBuilder(c).withTestSyncOff().prepareTable(), maxDurationMs, backgroundPool, largeBatchInsert)}")
-            println("Large batch insert stats (sync on): ${runTest(TestBuilder(c).withTestSyncOn().prepareTable(), maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Single insert stats (sync off): ${TestBuilder(c).withTestSyncOff().prepareTable().runTest(maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Single insert stats (sync on): ${TestBuilder(c).withTestSyncOn().prepareTable().runTest(maxDurationMs, backgroundPool, singleInsert)}")
+            println("Large batch insert stats (sync off): ${TestBuilder(c).withTestSyncOff().prepareTable().runTest(maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Large batch insert stats (sync on): ${TestBuilder(c).withTestSyncOn().prepareTable().runTest(maxDurationMs, backgroundPool, largeBatchInsert)}")
         }
     } catch(e: Exception) {
         e.printStackTrace()
