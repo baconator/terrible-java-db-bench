@@ -3,6 +3,7 @@ package io.github.baconator.benchmarks.sqliteinsert1
 import com.google.common.collect.Lists
 import java.nio.file.FileSystems
 import java.nio.file.Files
+import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.util.*
@@ -22,14 +23,27 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
 interface Database {
     val filename: String
     val connectionString: String
+    fun changeSync(connection: Connection, syncState: Boolean)
 }
 
 class SqliteDb(override val filename: String) : Database {
+    override fun changeSync(connection: Connection, syncState: Boolean) {
+        if(syncState){
+            connection.createStatement().use { it.execute("pragma synchronous=on;") }
+        }else {
+            connection.createStatement().use { it.execute("pragma synchronous=off;") }
+        }
+    }
+
     override val connectionString: String
         get() = "jdbc:sqlite:./$filename"
 }
 
 class H2Db(override val filename: String) : Database {
+    override fun changeSync(connection: Connection, syncState: Boolean) {
+        // noop
+    }
+
     override val connectionString: String
         get() = "jdbc:h2:./$filename" //To change initializer of created properties use File | Settings | File Templates.
 }
@@ -94,6 +108,8 @@ fun main(args: Array<String>) {
     // The background pool is used for killing tests after maxTestDurationMs milliseconds.
     val backgroundPool = Executors.newScheduledThreadPool(6)
     try {
+        Class.forName("org.h2.Driver")
+        TestBuilder(H2Db(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
         TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
         TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
         TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }

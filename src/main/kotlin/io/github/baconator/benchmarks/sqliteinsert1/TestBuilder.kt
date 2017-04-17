@@ -32,13 +32,13 @@ class TestBuilder(private val db: Database) : AutoCloseable {
     var stats: Stats? = null
     var testFun: TestF? = null
     fun syncOff(): TestBuilder {
-        connection.createStatement().use { it.execute("pragma synchronous=off;") }
+        db.changeSync(connection, false)
         syncOn = false
         return this
     }
 
     fun syncOn(): TestBuilder {
-        connection.createStatement().use { it.execute("pragma synchronous=on;") }
+        db.changeSync(connection, true)
         syncOn = true
         return this
     }
