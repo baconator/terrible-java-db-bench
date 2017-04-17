@@ -1,6 +1,9 @@
 package io.github.baconator.benchmarks.sqliteinsert1
 
+import java.nio.file.FileSystems
+import java.nio.file.Files
 import java.sql.Connection
+import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -13,9 +16,16 @@ import java.util.concurrent.TimeoutException
  * @property testFun The test which will modify a provided [Stats] object.
  * @constructor Creates an indirection layer for raw connections.
  */
-class TestBuilder(val connection: Connection) : AutoCloseable {
+class TestBuilder(private val db: Database) : AutoCloseable {
+    val connection = DriverManager.getConnection(db.connectionString)
     override fun close() {
         connection.close()
+        val fs = FileSystems.getDefault()
+        try {
+            Files.delete(fs.getPath("./${db.filename}"))
+        } catch(e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     var syncOn: Boolean = false
@@ -91,7 +101,7 @@ class TestBuilder(val connection: Connection) : AutoCloseable {
         return this
     }
 
-    fun print() : TestBuilder {
+    fun print(): TestBuilder {
         println("${testFun?.name} (sync: $syncOn): $stats")
         return this
     }

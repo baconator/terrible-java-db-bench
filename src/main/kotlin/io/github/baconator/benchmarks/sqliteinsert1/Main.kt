@@ -19,6 +19,21 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
     }
 }
 
+interface Database {
+    val filename: String
+    val connectionString: String
+}
+
+class SqliteDb(override val filename: String) : Database {
+    override val connectionString: String
+        get() = "jdbc:sqlite:./$filename"
+}
+
+class H2Db(override val filename: String) : Database {
+    override val connectionString: String
+        get() = "jdbc:h2:./$filename" //To change initializer of created properties use File | Settings | File Templates.
+}
+
 /**
  * A test function.
  * @property name The name of this test. Used for e.g. printing out test results.
@@ -79,23 +94,22 @@ fun main(args: Array<String>) {
     // The background pool is used for killing tests after maxTestDurationMs milliseconds.
     val backgroundPool = Executors.newScheduledThreadPool(6)
     try {
-        val jdbcUrl = "jdbc:sqlite:$benchDbFilename"
-        TestBuilder(DriverManager.getConnection(jdbcUrl)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
-        TestBuilder(DriverManager.getConnection(jdbcUrl)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
-        TestBuilder(DriverManager.getConnection(jdbcUrl)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }
-        TestBuilder(DriverManager.getConnection(jdbcUrl)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }
-        TestBuilder(DriverManager.getConnection(jdbcUrl)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print().use {  }
-        TestBuilder(DriverManager.getConnection(jdbcUrl)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print().use {  }
+        TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
+        TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
+        TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }
+        TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }
+        TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print().use {  }
+        TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print().use {  }
     } catch(e: Exception) {
         e.printStackTrace()
     }
     backgroundPool.shutdownNow()
-    try {
+    /*try {
         val fs = FileSystems.getDefault()
         Files.delete(fs.getPath("./$benchDbFilename"))
     } catch(e: Exception) {
         e.printStackTrace()
-    }
+    }*/
 }
 
 /**
