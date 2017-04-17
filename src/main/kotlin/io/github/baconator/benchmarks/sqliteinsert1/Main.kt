@@ -7,7 +7,10 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.util.*
-import java.util.concurrent.*
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics(), val insertTimes: LongSummaryStatistics = LongSummaryStatistics()) {
     fun accept(size: Long, time: Long) {
@@ -37,6 +40,21 @@ class TestBuilder(val connection: Connection) {
         }
         return this
     }
+
+    fun <R> prepareStatement(queryString: String, f: (PreparedStatement) -> R): R {
+        return connection.prepareStatement(queryString).use(f)
+    }
+
+    fun <R> batchInsertStatement(testData: Array<Row>, f: (PreparedStatement) -> R): R {
+        val queryString = "insert into benchmark(i1, i2, o1, o2, fitness) values ${(0..testData.size - 1).map { "(?, ?, ?, ?, ?)" }.joinToString(",")};"
+        return prepareStatement(queryString) { prepared ->
+            testData.forEachIndexed({ i, row ->
+                val base = i * 5 + 1;
+                row.applyToStatement(prepared, base)
+            })
+            f.invoke(prepared)
+        }
+    }
 }
 
 fun main(args: Array<String>) {
@@ -49,14 +67,12 @@ fun main(args: Array<String>) {
     val backgroundPool = Executors.newScheduledThreadPool(6)
     val streamingPool = Executors.newScheduledThreadPool(6)
     try {
-        val batchPauseMs = 10L
-        val singleValueCreatedMs = 1L
         val singleBatchSize = 10;
-        DriverManager.getConnection("jdbc:sqlite:$filename").use { connection ->
-            val singleInsert: (Stats) -> Unit = { stats ->
+        DriverManager.getConnection("jdbc:sqlite:$filename").use { c ->
+            val singleInsert: (TestBuilder, Stats) -> Unit = { connection, stats ->
                 testData.asSequence().map { row ->
                     val start = System.nanoTime()
-                    connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);").use { prepared ->
+                    connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
                         row.applyToStatement(prepared)
                         val result = prepared.execute()
                         val end = System.nanoTime()
@@ -65,19 +81,19 @@ fun main(args: Array<String>) {
                     }
                 }.forEach { stats.accept(1, it) }
             }
-            val largeBatchInsert: (Stats) -> Unit = { stats ->
+            val largeBatchInsert: (TestBuilder, Stats) -> Unit = { connection, stats ->
                 val start = System.nanoTime()
-                makeBatchInsertStatement(connection, testDataArray).use { prepared ->
+                connection.batchInsertStatement(testDataArray) { prepared ->
                     val result = prepared.execute()
                     val end = System.nanoTime()
                     assert(result, { -> "Failed to insert a row ..." })
                     stats.accept(testDataArray.size.toLong(), end - start)
                 }
             }
-            val smallBatchInsert: (Stats) -> Unit = { stats ->
+            val smallBatchInsert: (TestBuilder, Stats) -> Unit = { connection, stats ->
                 Lists.partition(testData.toList(), singleBatchSize).asSequence().forEach { batch ->
                     val start = System.nanoTime()
-                    makeBatchInsertStatement(connection, batch.toTypedArray()).use { prepared ->
+                    connection.batchInsertStatement(batch.toTypedArray()) { prepared ->
                         val result = prepared.execute()
                         val end = System.nanoTime()
                         assert(result, { -> "Failed to insert a row ..." })
@@ -85,10 +101,10 @@ fun main(args: Array<String>) {
                     }
                 }
             }
-            println("Single insert stats (sync off): ${timeTest(TestBuilder(connection).withTestSyncOff(), maxDurationMs, backgroundPool, smallBatchInsert)}")
-            println("Single insert stats (sync on): ${timeTest(TestBuilder(connection).withTestSyncOn(), maxDurationMs, backgroundPool, singleInsert)}")
-            println("Large batch insert stats (sync off): ${timeTest(TestBuilder(connection).withTestSyncOff(), maxDurationMs, backgroundPool, largeBatchInsert)}")
-            println("Large batch insert stats (sync on): ${timeTest(TestBuilder(connection).withTestSyncOn(), maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Single insert stats (sync off): ${runTest(TestBuilder(c).withTestSyncOff().prepareTable(), maxDurationMs, backgroundPool, smallBatchInsert)}")
+            println("Single insert stats (sync on): ${runTest(TestBuilder(c).withTestSyncOn().prepareTable(), maxDurationMs, backgroundPool, singleInsert)}")
+            println("Large batch insert stats (sync off): ${runTest(TestBuilder(c).withTestSyncOff().prepareTable(), maxDurationMs, backgroundPool, largeBatchInsert)}")
+            println("Large batch insert stats (sync on): ${runTest(TestBuilder(c).withTestSyncOn().prepareTable(), maxDurationMs, backgroundPool, largeBatchInsert)}")
         }
     } catch(e: Exception) {
         e.printStackTrace()
@@ -101,17 +117,6 @@ fun main(args: Array<String>) {
     } catch(e: Exception) {
         e.printStackTrace()
     }
-}
-
-private fun makeBatchInsertStatement(connection: Connection, testData: Array<Row>): PreparedStatement {
-    val prepared = connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values ${
-    (0..testData.size - 1).map { "(?, ?, ?, ?, ?)" }.joinToString(",")
-    };")
-    testData.forEachIndexed({ i, row ->
-        val base = i * 5 + 1;
-        row.applyToStatement(prepared, base)
-    })
-    return prepared
 }
 
 /**
@@ -145,10 +150,9 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     return output
 }
 
-fun timeTest(connection: TestBuilder, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (Stats) -> Unit): Stats {
-    connection.prepareTable()
+fun runTest(connection: TestBuilder, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: (TestBuilder, Stats) -> Unit): Stats {
     val stats = Stats()
-    runForMs({ test(stats) }, maxDurationMs, backgroundPool)
+    runForMs({ test(connection, stats) }, maxDurationMs, backgroundPool)
     return stats
 }
 
