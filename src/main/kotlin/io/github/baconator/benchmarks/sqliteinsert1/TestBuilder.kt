@@ -13,7 +13,11 @@ import java.util.concurrent.TimeoutException
  * @property testFun The test which will modify a provided [Stats] object.
  * @constructor Creates an indirection layer for raw connections.
  */
-class TestBuilder(val connection: Connection) {
+class TestBuilder(val connection: Connection) : AutoCloseable {
+    override fun close() {
+        connection.close()
+    }
+
     var syncOn: Boolean = false
     var stats: Stats? = null
     var testFun: TestF? = null
@@ -87,8 +91,9 @@ class TestBuilder(val connection: Connection) {
         return this
     }
 
-    fun print() {
+    fun print() : TestBuilder {
         println("${testFun?.name} (sync: $syncOn): $stats")
+        return this
     }
 
     /**
