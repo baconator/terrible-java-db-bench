@@ -11,6 +11,7 @@ import java.util.concurrent.TimeoutException
  * @property syncOn Whether 'synchronous' is active or not in sqlite (see [https://sqlite.org/pragma.html#pragma_synchronous])
  * @property stats The stats object that results from test execution.
  * @property testFun The test which will modify a provided [Stats] object.
+ * @constructor Creates an indirection layer for raw connections.
  */
 class TestBuilder(val connection: Connection) {
     var syncOn: Boolean = false
@@ -63,7 +64,7 @@ class TestBuilder(val connection: Connection) {
         val queryString = "insert into benchmark(i1, i2, o1, o2, fitness) values ${(0..testData.size - 1).map { "(?, ?, ?, ?, ?)" }.joinToString(",")};"
         return prepareStatement(queryString) { prepared ->
             testData.forEachIndexed({ i, row ->
-                val base = i * 5 + 1;
+                val base = i * 5 + 1
                 row.applyToStatement(prepared, base)
             })
             f.invoke(prepared)

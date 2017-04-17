@@ -30,15 +30,18 @@ class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
 }
 
 fun main(args: Array<String>) {
-    val now = System.nanoTime()
     val sampleSize = 10000
+
+    // Create some data for insertion later on.
     val sourceData = generateTestData(sampleSize * 2)
     val testData = sourceData.take(sampleSize).toSet()
-    val preinsertedData = sourceData.drop(sampleSize).take(sampleSize).toSet()
-    val maxDurationMs = 5 * 1000L;
-    val filename = "benchmark-$now.db"
-    val backgroundPool = Executors.newScheduledThreadPool(6)
-    val singleBatchSize = 10;
+    val preinsertedData = sourceData.drop(sampleSize).take(sampleSize).toSet() // Used to bulk up db before entering data.
+
+    val benchDbFilename = "benchmark-${System.nanoTime()}.db"
+    val maxTestDurationMs = 5 * 1000L // Max duration of a test before it's forcibly stopped (in ms).
+    val singleBatchSize = 10 // Defines how large a given 'small' batch should be. Large batches = sampleSize.
+
+    // Setup the different payloads for testing.
     val singleInsert = TestF("Individual insert") { testData, connection, stats ->
         testData.asSequence().map { row ->
             val start = System.nanoTime()
@@ -72,14 +75,17 @@ fun main(args: Array<String>) {
             }
         }
     }
+
+    // The background pool is used for killing tests after maxTestDurationMs milliseconds.
+    val backgroundPool = Executors.newScheduledThreadPool(6)
     try {
-        DriverManager.getConnection("jdbc:sqlite:$filename").use { c ->
-            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, largeBatchInsert).print()
-            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
-            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, smallBatchInsert).print()
-            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
-            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxDurationMs, backgroundPool, singleInsert).print()
+        DriverManager.getConnection("jdbc:sqlite:$benchDbFilename").use { c ->
+            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()
+            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print()
+            TestBuilder(c).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()
+            TestBuilder(c).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print()
         }
     } catch(e: Exception) {
         e.printStackTrace()
@@ -87,7 +93,7 @@ fun main(args: Array<String>) {
     backgroundPool.shutdownNow()
     try {
         val fs = FileSystems.getDefault()
-        Files.delete(fs.getPath("./$filename"))
+        Files.delete(fs.getPath("./$benchDbFilename"))
     } catch(e: Exception) {
         e.printStackTrace()
     }
