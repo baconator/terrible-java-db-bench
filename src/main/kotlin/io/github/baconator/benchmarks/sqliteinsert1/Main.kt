@@ -24,9 +24,15 @@ interface Database {
     val filename: String
     val connectionString: String
     fun changeSync(connection: Connection, syncState: Boolean)
+    fun cleanup()
 }
 
 class SqliteDb(override val filename: String) : Database {
+    override fun cleanup() {
+        val fs = FileSystems.getDefault()
+        Files.delete(fs.getPath("./$filename"))
+    }
+
     override fun changeSync(connection: Connection, syncState: Boolean) {
         if(syncState){
             connection.createStatement().use { it.execute("pragma synchronous=on;") }
@@ -40,6 +46,11 @@ class SqliteDb(override val filename: String) : Database {
 }
 
 class H2Db(override val filename: String) : Database {
+    override fun cleanup() {
+        val fs = FileSystems.getDefault()
+        Files.delete(fs.getPath("./$filename.mv.db"))
+    }
+
     override fun changeSync(connection: Connection, syncState: Boolean) {
         // noop
     }

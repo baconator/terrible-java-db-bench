@@ -20,9 +20,8 @@ class TestBuilder(private val db: Database) : AutoCloseable {
     val connection = DriverManager.getConnection(db.connectionString)
     override fun close() {
         connection.close()
-        val fs = FileSystems.getDefault()
         try {
-            Files.delete(fs.getPath("./${db.filename}"))
+            db.cleanup()
         } catch(e: Exception) {
             e.printStackTrace()
         }
