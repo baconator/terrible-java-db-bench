@@ -12,6 +12,10 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
+/**
+ * @property batchSizes The # of rows in insert statements sent to the DB in a single transaction.
+ * @property insertTimes How long each insert transaction took, in ns.
+ */
 data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics(), val insertTimes: LongSummaryStatistics = LongSummaryStatistics()) {
     fun accept(size: Long, time: Long) {
         batchSizes.accept(size)
@@ -19,6 +23,12 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
     }
 }
 
+/**
+ * Indirection layer for raw connections.
+ * @property syncOn Whether 'synchronous' is active or not in sqlite (see [https://sqlite.org/pragma.html#pragma_synchronous])
+ * @property stats The stats object that results from test execution.
+ * @property testFun The test which will modify a provided [Stats] object.
+ */
 class TestBuilder(val connection: Connection) {
     var syncOn: Boolean = false
     var stats: Stats? = null
@@ -35,6 +45,9 @@ class TestBuilder(val connection: Connection) {
         return this
     }
 
+    /**
+     * Drops the 'benchmark' table, then creates some indices on it.
+     */
     fun prepareTable(): TestBuilder {
         connection.createStatement().use { statement ->
             statement.queryTimeout = 30
@@ -50,6 +63,19 @@ class TestBuilder(val connection: Connection) {
         return connection.prepareStatement(queryString).use(f)
     }
 
+    /**
+     * Takes a row and creates a prepared statement inserting one of it into the DB.
+     */
+    fun <R> insertStatement(row: Row, f: (PreparedStatement) -> R): R {
+        return prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
+            row.applyToStatement(prepared)
+            f.invoke(prepared)
+        }
+    }
+
+    /**
+     * Takes multiple rows and creates a prepared statement insertion them into the DB.
+     */
     fun <R> batchInsertStatement(testData: Array<Row>, f: (PreparedStatement) -> R): R {
         val queryString = "insert into benchmark(i1, i2, o1, o2, fitness) values ${(0..testData.size - 1).map { "(?, ?, ?, ?, ?)" }.joinToString(",")};"
         return prepareStatement(queryString) { prepared ->
@@ -61,6 +87,9 @@ class TestBuilder(val connection: Connection) {
         }
     }
 
+    /**
+     * Executes a test with some given data, a max timeout and an execution pool (so that the test can be timed out).
+     */
     fun runTest(testData: Set<Row>, maxDurationMs: Long, backgroundPool: ScheduledExecutorService, test: TestF): TestBuilder {
         val stats = Stats()
         runForMs({ test.execute(testData, this, stats) }, maxDurationMs, backgroundPool)
@@ -73,6 +102,9 @@ class TestBuilder(val connection: Connection) {
         println("${testFun?.name} (sync: $syncOn): $stats")
     }
 
+    /**
+     * Inserts a bunch of extra garbage. Intended to bloat the size of the DB before testing.
+     */
     fun preinsertData(data: Set<Row>): TestBuilder {
         batchInsertStatement(data.toTypedArray()) { prepared ->
             prepared.execute()
@@ -81,6 +113,10 @@ class TestBuilder(val connection: Connection) {
     }
 }
 
+/**
+ * A test function.
+ * @property name The name of this test. Used for e.g. printing out test results.
+ */
 class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
     fun execute(testData: Set<Row>, testBuilder: TestBuilder, stats: Stats) {
         return f.invoke(testData, testBuilder, stats)
@@ -90,7 +126,7 @@ class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
 fun main(args: Array<String>) {
     val now = System.nanoTime()
     val sampleSize = 10000
-    val sourceData = generateTestData(sampleSize*2)
+    val sourceData = generateTestData(sampleSize * 2)
     val testData = sourceData.take(sampleSize).toSet()
     val preinsertedData = sourceData.drop(sampleSize).take(sampleSize).toSet()
     val maxDurationMs = 5 * 1000L;
@@ -100,8 +136,7 @@ fun main(args: Array<String>) {
     val singleInsert = TestF("Individual insert") { testData, connection, stats ->
         testData.asSequence().map { row ->
             val start = System.nanoTime()
-            connection.prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
-                row.applyToStatement(prepared)
+            connection.insertStatement(row) { prepared ->
                 val result = prepared.execute()
                 val end = System.nanoTime()
                 assert(result, { -> "Failed to insert a row ..." })
@@ -110,8 +145,8 @@ fun main(args: Array<String>) {
         }.forEach { stats.accept(1, it) }
     }
     val largeBatchInsert = TestF("Large batch insert") { testData, connection, stats ->
+        val testDataArray = testData.toTypedArray()
         val start = System.nanoTime()
-        val testDataArray = testData.toTypedArray() // In case this is terribly slow
         connection.batchInsertStatement(testDataArray) { prepared ->
             val result = prepared.execute()
             val end = System.nanoTime()
@@ -121,8 +156,9 @@ fun main(args: Array<String>) {
     }
     val smallBatchInsert = TestF("Small batch insert") { testData, connection, stats ->
         Lists.partition(testData.toList(), singleBatchSize).asSequence().forEach { batch ->
+            val batchArray = batch.toTypedArray()
             val start = System.nanoTime()
-            connection.batchInsertStatement(batch.toTypedArray()) { prepared ->
+            connection.batchInsertStatement(batchArray) { prepared ->
                 val result = prepared.execute()
                 val end = System.nanoTime()
                 assert(result, { -> "Failed to insert a row ..." })
