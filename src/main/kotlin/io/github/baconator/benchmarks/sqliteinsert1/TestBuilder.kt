@@ -101,7 +101,7 @@ class TestBuilder(private val db: Database) : AutoCloseable {
     }
 
     fun print(): TestBuilder {
-        println("${testFun?.name} (sync: $syncOn): $stats")
+        println("${db.name}${testFun?.name} (sync: $syncOn): $stats")
         return this
     }
 

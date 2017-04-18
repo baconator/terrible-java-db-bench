@@ -23,11 +23,14 @@ data class Stats(val batchSizes: LongSummaryStatistics = LongSummaryStatistics()
 interface Database {
     val filename: String
     val connectionString: String
+    val name: String
     fun changeSync(connection: Connection, syncState: Boolean)
     fun cleanup()
 }
 
 class SqliteDb(override val filename: String) : Database {
+    override val name = "SQLite"
+
     override fun cleanup() {
         val fs = FileSystems.getDefault()
         Files.delete(fs.getPath("./$filename"))
@@ -46,6 +49,8 @@ class SqliteDb(override val filename: String) : Database {
 }
 
 class H2Db(override val filename: String) : Database {
+    override val name = "H2Db"
+
     override fun cleanup() {
         val fs = FileSystems.getDefault()
         Files.delete(fs.getPath("./$filename.mv.db"))
