@@ -4,7 +4,6 @@ import com.google.common.collect.Lists
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.util.*
 import java.util.concurrent.Executors
@@ -37,9 +36,9 @@ class SqliteDb(override val filename: String) : Database {
     }
 
     override fun changeSync(connection: Connection, syncState: Boolean) {
-        if(syncState){
+        if (syncState) {
             connection.createStatement().use { it.execute("pragma synchronous=on;") }
-        }else {
+        } else {
             connection.createStatement().use { it.execute("pragma synchronous=off;") }
         }
     }
@@ -74,8 +73,23 @@ class TestF(val name: String, val f: (Set<Row>, TestBuilder, Stats) -> Unit) {
     }
 }
 
+typealias Step = (TestBuilder) -> TestBuilder
+
+fun prepTest(selectedSteps: List<Step>, builder: () -> TestBuilder, optionalStepGroups: List<List<Step>>): List<() -> TestBuilder> =
+        if (optionalStepGroups.isEmpty()) {
+            listOf({ selectedSteps.fold(builder.invoke(), { b, s -> s.invoke(b) }) })
+        } else {
+            optionalStepGroups.first().flatMap { optionalStep ->
+                prepTest(selectedSteps + listOf(optionalStep), builder, optionalStepGroups.drop(1))
+            }
+        }
+
+
+fun prepTest(builder: () -> TestBuilder, optionalStepGroups: List<List<Step>>): List<() -> TestBuilder> =
+        prepTest(listOf(), builder, optionalStepGroups)
+
 fun main(args: Array<String>) {
-    val sampleSize = 10000
+    val sampleSize = 1
 
     // Create some data for insertion later on.
     val sourceData = generateTestData(sampleSize * 2)
@@ -83,7 +97,7 @@ fun main(args: Array<String>) {
     val preinsertedData = sourceData.drop(sampleSize).take(sampleSize).toSet() // Used to bulk up db before entering data.
 
     val benchDbFilename = "benchmark-${System.nanoTime()}.db"
-    val maxTestDurationMs = 5 * 1000L // Max duration of a test before it's forcibly stopped (in ms).
+    val maxTestDurationMs = 500 * 1000L // Max duration of a test before it's forcibly stopped (in ms).
     val singleBatchSize = 10 // Defines how large a given 'small' batch should be. Large batches = sampleSize.
 
     // Setup the different payloads for testing.
@@ -102,7 +116,11 @@ fun main(args: Array<String>) {
         val testDataArray = testData.toTypedArray()
         val start = System.nanoTime()
         connection.batchInsertStatement(testDataArray) { prepared ->
-            val result = prepared.execute()
+            val result = try {
+                prepared.execute()
+            } catch(e: Exception) {
+                throw e
+            }
             val end = System.nanoTime()
             assert(result, { -> "Failed to insert a row ..." })
             stats.accept(testDataArray.size.toLong(), end - start)
@@ -125,13 +143,24 @@ fun main(args: Array<String>) {
     val backgroundPool = Executors.newScheduledThreadPool(6)
     try {
         Class.forName("org.h2.Driver")
-        TestBuilder(H2Db(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
-        TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
-        TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert).print().use {  }
-        TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }
-        TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert).print().use {  }
-        TestBuilder(SqliteDb(benchDbFilename)).syncOff().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print().use {  }
-        TestBuilder(SqliteDb(benchDbFilename)).syncOn().prepareTable().preinsertData(preinsertedData).runTest(testData, maxTestDurationMs, backgroundPool, singleInsert).print().use {  }
+        val dbBuilders = listOf({ H2Db(benchDbFilename) }, { SqliteDb(benchDbFilename) })
+        val steps: List<List<Step>> = listOf(
+                listOf({ b -> b.syncOff() },
+                        { b -> b.syncOn() }),
+                listOf({ b -> b.prepareTable() }),
+                listOf({ b -> b.preinsertData(preinsertedData) }),
+                listOf({ b -> b.runTest(testData, maxTestDurationMs, backgroundPool, largeBatchInsert) },
+                        { b -> b.runTest(testData, maxTestDurationMs, backgroundPool, smallBatchInsert) },
+                        { b -> b.runTest(testData, maxTestDurationMs, backgroundPool, singleInsert) }),
+                listOf({ b -> b.print() })
+        )
+
+        dbBuilders.forEach { db ->
+            val prepTest = prepTest({ TestBuilder(db.invoke()) }, steps).toList()
+            prepTest.forEach { test ->
+                test.invoke().use { }
+            }
+        }
     } catch(e: Exception) {
         e.printStackTrace()
     }
@@ -145,10 +174,20 @@ fun main(args: Array<String>) {
 }
 
 /**
- * input1 + input2 are primary keys, output1, output2 and fitness are indexed. Yes, I know that the pkeys aren't aligned w/the db schemas.
+ * input1 + input2 are primary keys, output1, output2 and fitness are indexed.
  */
-data class Row(val input1: Double, val input2: Double, val output1: Double, val output2: Double, val fitness: Double) {
+class Row(val input1: Float, val input2: Float, val output1: Float, val output2: Float, val fitness: Float) {
+    override fun equals(other: Any?): Boolean {
+        val casted = other as? Row ?: return false
+        return input1 == casted.input1 && input2 == casted.input2
+    }
+
+    override fun hashCode(): Int {
+        return Objects.hash(input1, input2)
+    }
+
     fun applyToStatement(prepared: PreparedStatement, base: Int = 1) {
+
         prepared.setObject(base + 0, this.input1)
         prepared.setObject(base + 1, this.input2)
         prepared.setObject(base + 2, this.output1)
@@ -161,7 +200,7 @@ fun generateTestData(sampleSize: Int): Set<Row> {
     val output = mutableSetOf<Row>()
     val random = Random()
     while (output.size < sampleSize) {
-        output.add(Row(random.nextDouble(), random.nextDouble(), random.nextDouble(), random.nextDouble(), random.nextDouble()))
+        output.add(Row(random.nextFloat(), random.nextFloat(), random.nextFloat(), random.nextFloat(), random.nextFloat()))
     }
     return output
 }

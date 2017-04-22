@@ -5,10 +5,13 @@ import java.nio.file.Files
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
+import java.util.*
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
+
+val random = Random()
 /**
  * Indirection layer for raw connections.
  * @property syncOn Whether 'synchronous' is active or not in sqlite (see [https://sqlite.org/pragma.html#pragma_synchronous])
@@ -17,6 +20,7 @@ import java.util.concurrent.TimeoutException
  * @constructor Creates an indirection layer for raw connections.
  */
 class TestBuilder(private val db: Database) : AutoCloseable {
+    val tableName = "benchmark"
     val connection = DriverManager.getConnection(db.connectionString)
     override fun close() {
         connection.close()
@@ -27,6 +31,7 @@ class TestBuilder(private val db: Database) : AutoCloseable {
         }
     }
 
+    var preinserted: Boolean = false
     var syncOn: Boolean = false
     var stats: Stats? = null
     var testFun: TestF? = null
@@ -47,11 +52,11 @@ class TestBuilder(private val db: Database) : AutoCloseable {
      */
     fun prepareTable(): TestBuilder {
         connection.createStatement().use { statement ->
-            statement.queryTimeout = 30
-            statement.executeUpdate("drop table if exists benchmark;")
-            statement.executeUpdate("create table benchmark(i1 double, i2 double, o1 double, o2 double, fitness double, primary key(i1, i2));")
-            statement.executeUpdate("create index fitness on benchmark (fitness);")
-            statement.executeUpdate("create index outputs on benchmark (o1, o2);")
+            statement.queryTimeout = 3
+            statement.executeUpdate("drop table if exists $tableName;")
+            statement.executeUpdate("create table $tableName(i1 double, i2 double, o1 double, o2 double, fitness double, primary key(i1, i2));")
+            statement.executeUpdate("create index fitness on $tableName (fitness);")
+            statement.executeUpdate("create index outputs on $tableName (o1, o2);")
         }
         return this
     }
@@ -64,7 +69,7 @@ class TestBuilder(private val db: Database) : AutoCloseable {
      * Takes a row and creates a prepared statement inserting one of it into the DB.
      */
     fun <R> insertStatement(row: Row, f: (PreparedStatement) -> R): R {
-        return prepareStatement("insert into benchmark(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
+        return prepareStatement("insert into $tableName(i1, i2, o1, o2, fitness) values (?, ?, ?, ?, ?);") { prepared ->
             row.applyToStatement(prepared)
             f.invoke(prepared)
         }
@@ -74,7 +79,7 @@ class TestBuilder(private val db: Database) : AutoCloseable {
      * Takes multiple rows and creates a prepared statement insertion them into the DB.
      */
     fun <R> batchInsertStatement(testData: Array<Row>, f: (PreparedStatement) -> R): R {
-        val queryString = "insert into benchmark(i1, i2, o1, o2, fitness) values ${(0..testData.size - 1).map { "(?, ?, ?, ?, ?)" }.joinToString(",")};"
+        val queryString = "insert into $tableName(i1, i2, o1, o2, fitness) values ${(0..testData.size - 1).map { "(?, ?, ?, ?, ?)" }.joinToString(",")};"
         return prepareStatement(queryString) { prepared ->
             testData.forEachIndexed({ i, row ->
                 val base = i * 5 + 1
@@ -101,7 +106,12 @@ class TestBuilder(private val db: Database) : AutoCloseable {
     }
 
     fun print(): TestBuilder {
-        println("${db.name}${testFun?.name} (sync: $syncOn): $stats")
+        val preinsertStatement = if (preinserted) {
+            "Data preinserted."
+        } else {
+            ""
+        }
+        println("${db.name}. $preinsertStatement ${testFun?.name} (sync: $syncOn): $stats")
         return this
     }
 
@@ -112,6 +122,7 @@ class TestBuilder(private val db: Database) : AutoCloseable {
         batchInsertStatement(data.toTypedArray()) { prepared ->
             prepared.execute()
         }
+        preinserted = true
         return this
     }
 }
