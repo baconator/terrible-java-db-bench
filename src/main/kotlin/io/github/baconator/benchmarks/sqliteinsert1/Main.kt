@@ -89,7 +89,7 @@ fun prepTest(builder: () -> TestBuilder, optionalStepGroups: List<List<Step>>): 
         prepTest(listOf(), builder, optionalStepGroups)
 
 fun main(args: Array<String>) {
-    val sampleSize = 1
+    val sampleSize = 10000
 
     // Create some data for insertion later on.
     val sourceData = generateTestData(sampleSize * 2)
@@ -97,7 +97,7 @@ fun main(args: Array<String>) {
     val preinsertedData = sourceData.drop(sampleSize).take(sampleSize).toSet() // Used to bulk up db before entering data.
 
     val benchDbFilename = "benchmark-${System.nanoTime()}.db"
-    val maxTestDurationMs = 500 * 1000L // Max duration of a test before it's forcibly stopped (in ms).
+    val maxTestDurationMs = 5 * 1000L // Max duration of a test before it's forcibly stopped (in ms).
     val singleBatchSize = 10 // Defines how large a given 'small' batch should be. Large batches = sampleSize.
 
     // Setup the different payloads for testing.
