@@ -19,7 +19,7 @@ val random = Random()
  * @property testFun The test which will modify a provided [Stats] object.
  * @constructor Creates an indirection layer for raw connections.
  */
-class TestBuilder(private val db: Database) : AutoCloseable {
+class TestBuilder(val db: Database) : AutoCloseable {
     val tableName = "benchmark"
     val connection = DriverManager.getConnection(db.connectionString)
     override fun close() {

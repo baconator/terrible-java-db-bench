@@ -1,6 +1,8 @@
 package io.github.baconator.benchmarks.sqliteinsert1
 
 import com.google.common.collect.Lists
+import org.apache.commons.csv.CSVFormat
+import org.apache.commons.csv.CSVPrinter
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.sql.Connection
@@ -155,22 +157,25 @@ fun main(args: Array<String>) {
                 listOf({ b -> b.print() })
         )
 
-        dbBuilders.forEach { db ->
-            val prepTest = prepTest({ TestBuilder(db.invoke()) }, steps).toList()
-            prepTest.forEach { test ->
-                test.invoke().use { }
+        val fs = FileSystems.getDefault()
+        val outputPath = fs.getPath("output.csv")
+        val format = CSVFormat.EXCEL.withHeader("tablePreloaded", "dbName", "fnName", "dbSyncMode", "batchCount", "batchSum", "batchAverage", "batchMin", "batchMax", "transactionCount", "transactionTimeSum", "transactionTimeAverage", "transactionTimeMin", "transactionTimeMax")
+        CSVPrinter(Files.newBufferedWriter(outputPath), format).use { printer ->
+            dbBuilders.forEach { db ->
+                val prepTest = prepTest({ TestBuilder(db.invoke()) }, steps).toList()
+                prepTest.forEach { test ->
+                    test.invoke().use { t ->
+                        val batchStats = t.stats?.batchSizes
+                        val transactionStats = t.stats?.insertTimes
+                        printer.printRecord(t.preinserted, t.db.name, t.testFun?.name ?: "null", t.syncOn, batchStats?.count, batchStats?.sum, batchStats?.average, batchStats?.min, batchStats?.max, transactionStats?.count, transactionStats?.sum, transactionStats?.average, transactionStats?.min, transactionStats?.max)
+                    }
+                }
             }
         }
     } catch(e: Exception) {
         e.printStackTrace()
     }
     backgroundPool.shutdownNow()
-    /*try {
-        val fs = FileSystems.getDefault()
-        Files.delete(fs.getPath("./$benchDbFilename"))
-    } catch(e: Exception) {
-        e.printStackTrace()
-    }*/
 }
 
 /**
